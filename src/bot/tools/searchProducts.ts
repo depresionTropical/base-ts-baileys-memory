@@ -4,11 +4,22 @@ import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 
 /**
+ * Define el esquema de entrada para la herramienta searchProducts.
+ * Esto asegura que el LLM pase los argumentos correctos.
+ */
+const searchProductsSchema = z.object({
+  query: z.string().describe("El término de búsqueda o descripción del producto a buscar. Ejemplos: 'papel bond', 'tinta hp', 'papel fotográfico a4', 'papel sulfatado blanco'"),
+});
+
+/**
  * Simula una función para buscar productos en una base de datos o sistema.
- * @param query La consulta de búsqueda del producto.
+ * @param args Objeto que contiene los argumentos de la herramienta, según searchProductsSchema.
+ * Debe incluir una propiedad 'query'.
  * @returns Un objeto JSON que simula los resultados de la búsqueda.
  */
-async function searchProductsTool(query: string) {
+async function searchProductsLogic(args: z.infer<typeof searchProductsSchema>) {
+  // CORRECTO: Accede a la propiedad 'query' del objeto 'args'
+  const query = args.query;
   console.log(`[Tool] search_products llamada con query: "${query}"`);
 
   // Simulación de una base de datos de productos (¡reemplaza con tu lógica real!)
@@ -24,7 +35,7 @@ async function searchProductsTool(query: string) {
     { id: "I001", nombre: "Plotter de Impresión de Gran Formato HP DesignJet T210", marca: "HP", tipo: "Impresora", precio: 25000},
   ];
 
-  const lowerCaseQuery = query.toLowerCase();
+  const lowerCaseQuery = query.toLowerCase(); // Ahora 'query' es una cadena, ¡funciona!
   const results = mockProducts.filter(p =>
     p.nombre.toLowerCase().includes(lowerCaseQuery) ||
     p.marca.toLowerCase().includes(lowerCaseQuery) ||
@@ -50,8 +61,6 @@ async function searchProductsTool(query: string) {
       status: "many_results",
       count: results.length,
       common_attributes: commonAttributes,
-      // Opcional: pasar una sub-lista de IDs para que el LLM los considere si necesita más contexto.
-      // current_result_ids: results.map(p => p.id),
     });
   } else if (results.length > 0) {
     return JSON.stringify({
@@ -73,8 +82,6 @@ async function searchProductsTool(query: string) {
 export const searchProducts = new DynamicStructuredTool({
   name: "search_products",
   description: "Busca productos en el catálogo de Proveedora de Artes Gráficas. Útil para encontrar cualquier tipo de material o equipo. Retorna si hay 'many_results', 'success' (con productos) o 'no_results'. Si hay muchos resultados, también proporciona 'common_attributes' para refinar la búsqueda.",
-  schema: z.object({
-    query: z.string().describe("El término de búsqueda o descripción del producto a buscar. Ejemplos: 'papel bond', 'tinta hp', 'papel fotográfico a4', 'papel sulfatado blanco'"),
-  }),
-  func: searchProductsTool,
+  schema: searchProductsSchema, // Usa el esquema definido
+  func: searchProductsLogic, // Usa la función corregida
 });
