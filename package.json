@@ -14,11 +14,13 @@
   "dependencies": {
     "@builderbot/bot": "1.2.9",
     "@builderbot/provider-baileys": "1.2.9",
-    "@langchain/core": "^0.3.57",
-    "@langchain/openai": "^0.5.11",
+    "@langchain/community": "^0.3.45",
+    "@langchain/core": "latest",
+    "@langchain/langgraph": "^0.3.0",
+    "@langchain/openai": "latest",
     "axios": "^1.9.0",
     "dotenv": "^16.5.0",
-    "langchain": "^0.3.27",
+    "langchain": "latest",
     "zod": "^3.25.42"
   },
   "devDependencies": {
