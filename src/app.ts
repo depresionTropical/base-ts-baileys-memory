@@ -8,7 +8,7 @@ import { BaileysProvider } from '@builderbot/provider-baileys';
 import { askAgent } from './bot'; 
 // Importa la función de inicialización de Redis desde el NUEVO servicio
 import { initializeRedisClient } from './services/redisService'; // <--- ¡CAMBIO AQUÍ!
-
+import { initializeOrRefreshProductVectorStore } from './services/productVectorStore'; // Importa la función de inicialización
 // Ya NO necesitas importar getChatHistory, addMessageToHistory, clearChatHistory
 
 const welcomeFlow = addKeyword(EVENTS.WELCOME)
@@ -49,6 +49,12 @@ const main = async () => {
     provider: adapterProvider,
     database: adapterDB,
   });
+  // Inicializa la Vector Store al inicio de la aplicación
+    await initializeOrRefreshProductVectorStore().catch(err => {
+        console.error("Fallo al inicializar la Product Vector Store al inicio:", err);
+        // Decide si la aplicación debe salir o continuar sin la función de búsqueda
+        process.exit(1); // O maneja el error de otra manera
+    });
 
   httpServer(3000);
 
