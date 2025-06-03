@@ -3,8 +3,8 @@
 import 'dotenv/config'; // Importa dotenv para cargar variables de entorno
 
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-export const LLM_MODEL = process.env.LLM_MODEL || 'gpt-4o-mini';
-export const TEMPERATURE = parseFloat(process.env.TEMPERATURE || '0.7');
+export const LLM_MODEL = process.env.LLM_MODEL || 'gpt-4o';
+export const TEMPERATURE = parseFloat(process.env.TEMPERATURE || '0.2');
 
 // Asegúrate de que las variables importantes estén definidas
 if (!OPENAI_API_KEY) {

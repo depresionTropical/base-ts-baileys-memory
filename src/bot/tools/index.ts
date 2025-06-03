@@ -1,7 +1,7 @@
 // src/bot/tools/index.ts
 
 import { searchProducts } from "./searchProducts";
-import { addToQuote, getQuoteSummary, clearQuote } from "./quoteManagement";
+import { addToQuote, getQuoteSummary, clearQuote , sendQuoteToEmail} from "./quoteManagement";
 import { handleGreeting, getFAQAnswer, explainChatbotCapabilities } from "./miscTools";
 
 // Exporta todas las herramientas que el agente puede usar
@@ -13,4 +13,5 @@ export const allTools = [
   handleGreeting,
   getFAQAnswer,
   explainChatbotCapabilities,
+  sendQuoteToEmail
 ];

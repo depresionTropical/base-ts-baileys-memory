@@ -41,7 +41,8 @@ async function searchProductsLogic(args: z.infer<typeof searchProductsSchema>) {
     p.marca.toLowerCase().includes(lowerCaseQuery) ||
     p.tipo?.toLowerCase().includes(lowerCaseQuery) ||
     p.color?.toLowerCase().includes(lowerCaseQuery) ||
-    p.tamaño?.toLowerCase().includes(lowerCaseQuery)
+    p.tamaño?.toLowerCase().includes(lowerCaseQuery) ||
+    p.id.toLowerCase() === lowerCaseQuery
   );
 
   const MAX_DISPLAY_RESULTS = 8; // Límite para mostrar directamente los resultados

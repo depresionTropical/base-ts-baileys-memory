@@ -14,8 +14,8 @@ export interface QuoteItem {
 // LangGraph automáticamente gestiona el 'messages' array.
 // Aquí añadimos las partes de tu estado que son específicas del bot.
 export interface AgentState {
-  messages: BaseMessage[]; // LangGraph ya espera esto.
-  quote_items?: QuoteItem[]; // Productos en el carrito de cotización
-  // Puedes añadir más campos si necesitas recordar algo específico
-  // a lo largo de las interacciones, por ejemplo, el último tipo de producto buscado.
+  messages: BaseMessage[];
+  thread_id: string; // <-- ¡Asegúrate de que esta línea esté presente!
+  quote_items: QuoteItem[];
+  // Puedes añadir otros campos según sea necesario para tu estado.
 }

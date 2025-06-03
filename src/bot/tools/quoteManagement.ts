@@ -3,6 +3,8 @@
 import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import { AgentState, QuoteItem } from "../state/types";
+// Importa CallbackConfig si la necesitas, aunque la desestructuración de configurable no la requiere directamente aquí.
+// import { CallbackConfig } from "@langchain/core/callbacks"; // No es estrictamente necesaria para esta corrección, pero útil para tipado si la usas.
 
 // Simulación de productos para validar la adición a la cotización
 const availableProducts = [
@@ -24,10 +26,12 @@ export const addToQuote = new DynamicStructuredTool({
     productId: z.string().describe("El ID único del producto a añadir (ej. 'P001', 'T002'). DEBE SER EL ID EXACTO DEL PRODUCTO."),
     quantity: z.number().int().positive().describe("La cantidad del producto a añadir. Debe ser un número entero positivo."),
   }),
-  func: async (input, config) => {
+  // CAMBIO CLAVE AQUÍ: Asegúrate de que 'config' no sea undefined antes de acceder a 'configurable'
+  // También, usaremos un objeto vacío como valor por defecto para 'config'
+  func: async (input, config: Record<string, any> = {}) => { // Añade un valor por defecto {} para config
     const { productId, quantity } = input;
-    const { configurable } = config;
-    const threadId = configurable?.thread_id;
+    // Acceso seguro a configurable usando el operador de encadenamiento opcional (?)
+    const threadId = config.configurable?.thread_id; 
 
     const product = availableProducts.find(p => p.id === productId);
 
@@ -36,7 +40,6 @@ export const addToQuote = new DynamicStructuredTool({
     }
 
     // Lógica para añadir/actualizar en el carrito (simulada en memoria global)
-    // CAMBIO AQUÍ: de 'let' a 'const'
     const currentQuoteItems: QuoteItem[] = (global as any)._quote_storage?.[threadId] || [];
     const existingItemIndex = currentQuoteItems.findIndex(item => item.id === productId);
 
@@ -63,11 +66,10 @@ export const getQuoteSummary = new DynamicStructuredTool({
   name: "get_quote_summary",
   description: "Muestra un resumen de los productos que el usuario ha añadido a su cotización (carrito de compras) y el total. Útil cuando el usuario pregunta por su 'carrito' o 'cotización actual'.",
   schema: z.object({}),
-  func: async (_, config) => {
-    const { configurable } = config;
-    const threadId = configurable?.thread_id;
+  // Aplica el mismo cambio aquí
+  func: async (_, config: Record<string, any> = {}) => {
+    const threadId = config.configurable?.thread_id;
 
-    // CAMBIO AQUÍ: de 'let' a 'const'
     const currentQuoteItems: QuoteItem[] = (global as any)._quote_storage?.[threadId] || [];
 
     if (currentQuoteItems.length === 0) {
@@ -91,13 +93,57 @@ export const clearQuote = new DynamicStructuredTool({
   name: "clear_quote",
   description: "Vacía el carrito de cotización del usuario. Útil si el usuario quiere empezar una cotización nueva o eliminar todos los productos.",
   schema: z.object({}),
-  func: async (_, config) => {
-    const { configurable } = config;
-    const threadId = configurable?.thread_id;
+  // Aplica el mismo cambio aquí
+  func: async (_, config: Record<string, any> = {}) => {
+    const threadId = config.configurable?.thread_id;
 
     (global as any)._quote_storage = (global as any)._quote_storage || {};
     (global as any)._quote_storage[threadId] = [];
 
     return "Tu cotización (carrito) ha sido vaciada.";
+  },
+});
+
+export const sendQuoteToEmail = new DynamicStructuredTool({
+  name: "send_quote_to_email",
+  description: "Envía la cotización actual a una dirección de correo electrónico proporcionada por el usuario. Útil cuando el usuario indica que quiere 'recibir su cotización' o 'finalizar y enviar'.",
+  schema: z.object({
+    email: z.string().email().describe("La dirección de correo electrónico a la que se enviará la cotización. Ejemplo: 'usuario@example.com'"),
+  }),
+  func: async ({ email }, config: Record<string, any> = {}) => {
+    const threadId = config.configurable?.thread_id;
+    const currentQuoteItems: QuoteItem[] = (global as any)._quote_storage?.[threadId] || [];
+
+    if (currentQuoteItems.length === 0) {
+      return "Tu cotización está vacía. No puedo enviar una cotización sin productos.";
+    }
+
+    let quoteContent = "Estimado cliente,\n\n";
+    quoteContent += "Aquí está el resumen de su cotización de Proveedora de Artes Gráficas:\n\n";
+    let total = 0;
+
+    currentQuoteItems.forEach(item => {
+      const itemTotal = item.price * item.quantity;
+      quoteContent += `- ${item.name} (ID: ${item.id}) - Cantidad: ${item.quantity} - Precio Unitario: $${item.price.toFixed(2)} - Subtotal: $${itemTotal.toFixed(2)}\n`;
+      total += itemTotal;
+    });
+
+    quoteContent += `\nTotal estimado de la cotización: $${total.toFixed(2)}`;
+    quoteContent += "\n\nGracias por su interés en nuestros productos. Si tiene alguna pregunta, no dude en contactarnos.\n";
+    quoteContent += "Atentamente,\nEl equipo de Proveedora de Artes Gráficas.";
+
+    // Simulación del envío de correo electrónico
+    console.log(`[Tool] Enviando cotización a ${email}:\n${quoteContent}`);
+
+    // Aquí integrarías una API de envío de correo real
+    // const emailServiceResult = await someEmailService.send(email, "Tu Cotización de Artes Gráficas", quoteContent);
+    // if (!emailServiceResult.success) {
+    //   return "Lo siento, hubo un error al intentar enviar la cotización. Por favor, inténtalo de nuevo más tarde.";
+    // }
+
+    // Opcional: limpiar la cotización después de enviarla
+    // (global as any)._quote_storage[threadId] = [];
+
+    return `Cotización enviada exitosamente a ${email}. ¡Recibirás un correo pronto!`;
   },
 });
