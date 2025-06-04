@@ -27,45 +27,44 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
             throw new Error("La respuesta de la API no contiene un arreglo de productos válido bajo la clave 'products'.");
         }
 
-        // 1. Filtrar productos por Existencias y Estado_Producto
+        // 1. FILTRAR productos por Existencias y Estado_Producto (RESTURADO)
         const productosDisponibles = productosRaw.filter((p: Product) =>
             p.Existencias >= 1 && p.Estado_Producto === 1
         ) as Product[];
 
+        // Mensaje de advertencia si no hay productos disponibles después del filtro
+        if (productosDisponibles.length === 0) {
+            console.warn("[API] No se encontraron productos con Existencias >= 1 y Estado_Producto === 1 después del filtro inicial.");
+        }
+
         // 2. Consolidar productos por Codigo_Producto
         const productosConsolidadosMap: { [key: string]: ConsolidatedProduct } = {};
 
-        for (const p of productosDisponibles) {
+        // Ahora iteramos sobre los productos YA FILTRADOS
+        for (const p of productosDisponibles) { // <-- ¡Importante! Usamos 'productosDisponibles'
             const codigoProducto = p.Codigo_Producto;
 
             if (productosConsolidadosMap[codigoProducto]) {
-                // Producto ya visto, agrega el almacén actual a su lista
                 if (!productosConsolidadosMap[codigoProducto].Almacenes_Disponibles.includes(p.Almacen)) {
                     productosConsolidadosMap[codigoProducto].Almacenes_Disponibles.push(p.Almacen);
                 }
-                // Suma las existencias para obtener el total consolidado
                 productosConsolidadosMap[codigoProducto].Existencias_Total += p.Existencias;
-                // Nota: El Precio_Venta se mantiene como el del primer almacén encontrado para este producto.
-                // Si necesitas una lógica diferente para el precio (ej. promedio, mínimo, máximo), ajústalo aquí.
-
             } else {
-                // Primera vez que vemos este producto, crea una nueva entrada consolidada
                 productosConsolidadosMap[codigoProducto] = {
                     ID_Producto: p.ID_Producto,
                     Producto: p.Producto,
                     Codigo_Producto: p.Codigo_Producto,
-                    Precio_Venta: p.Precio_Venta, // Toma el precio del primer almacén encontrado
-                    Existencias_Total: p.Existencias,
+                    Precio_Venta: p.Precio_Venta,
+                    Existencias_Total: p.Existencias, // Esta es la existencia del almacén actual
                     Estado_Producto: p.Estado_Producto,
-                    Almacenes_Disponibles: [p.Almacen] // Empieza con el almacén actual
+                    Almacenes_Disponibles: [p.Almacen]
                 };
             }
         }
 
-        // Convierte el mapa de productos consolidados de vuelta a un array
         const productosFinales = Object.values(productosConsolidadosMap);
 
-        console.log(`[API] Productos cargados, filtrados y consolidados: ${productosFinales.length} productos únicos encontrados.`);
+        console.log(`[API] Productos cargados, FILTRADOS por disponibilidad y consolidados: ${productosFinales.length} productos únicos encontrados.`);
         return productosFinales;
 
     } catch (error: any) {
@@ -73,6 +72,7 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
         throw new Error(`Error al conectar con el servicio de inventario: ${error.message}. Por favor, verifica que tu servicio está corriendo en http://localhost:4001.`);
     }
 }
+
 
 /**
  * Crea o actualiza la MemoryVectorStore con los productos obtenidos de la API.
