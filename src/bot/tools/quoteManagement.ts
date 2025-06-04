@@ -2,63 +2,64 @@
 
 import { z } from "zod";
 import { DynamicStructuredTool } from "@langchain/core/tools";
-import { AgentState, QuoteItem } from "../state/types";
-// Importa CallbackConfig si la necesitas, aunque la desestructuración de configurable no la requiere directamente aquí.
-// import { CallbackConfig } from "@langchain/core/callbacks"; // No es estrictamente necesaria para esta corrección, pero útil para tipado si la usas.
+import { AgentState, QuoteItem, ConsolidatedProduct } from "../state/types";
+// Importa la función para obtener los productos consolidados
+import { getConsolidatedProducts } from '../../services/productVectorStore'; 
 
-// Simulación de productos para validar la adición a la cotización
-const availableProducts = [
-  { id: "P001", nombre: "Papel Bond Carta", precio: 500 },
-  { id: "P002", nombre: "Papel Fotográfico A4", precio: 850 },
-  { id: "T001", nombre: "Tinta Negra HP 664", precio: 350 },
-  { id: "P003", nombre: "Papel Couche Brillante A3", precio: 1200 },
-  { id: "T002", nombre: "Tinta Cyan Epson T50", precio: 400 },
-  { id: "T003", nombre: "Cartuchos de Tinta EPSON T2991-T2994", precio: 1500},
-  { id: "C001", nombre: "Papel Sulfatado Blanco 12x18 12pt", precio: 900 },
-  { id: "C002", nombre: "Papel Sulfatado Brillante 12x18 14pt", precio: 1100 },
-  { id: "I001", nombre: "Plotter de Impresión de Gran Formato HP DesignJet T210", precio: 25000},
-];
+// *** ESTE ARRAY HA SIDO ELIMINADO. YA NO ES NECESARIO. ***
+// const availableProducts = [ ... ];
 
 export const addToQuote = new DynamicStructuredTool({
   name: "add_to_quote",
-  description: "Añade un producto al carrito de cotización del usuario. Requiere el ID exacto del producto (por ejemplo, 'P001') y la cantidad. Úsalo solo si el usuario ha especificado un producto y una cantidad clara, por ejemplo, 'agrega 2 de P001'.",
+  description: "Añade un producto al carrito de cotización del usuario. Requiere el ID único del producto. Siempre usa el 'ID_Producto' que se te proporcionó en las búsquedas (es un número, por ejemplo, 1341), NUNCA el 'Codigo_Producto' (el texto de código).",
   schema: z.object({
-    productId: z.string().describe("El ID único del producto a añadir (ej. 'P001', 'T002'). DEBE SER EL ID EXACTO DEL PRODUCTO."),
+    // productId ahora es de tipo 'number' para coincidir con ID_Producto
+    productId: z.number().describe("El ID único numérico del producto a añadir (ej. 1341). DEBE SER EL ID_Producto EXACTO RETORNADO POR search_products."),
     quantity: z.number().int().positive().describe("La cantidad del producto a añadir. Debe ser un número entero positivo."),
   }),
-  // CAMBIO CLAVE AQUÍ: Asegúrate de que 'config' no sea undefined antes de acceder a 'configurable'
-  // También, usaremos un objeto vacío como valor por defecto para 'config'
-  func: async (input, config: Record<string, any> = {}) => { // Añade un valor por defecto {} para config
+  func: async (input, config: Record<string, any> = {}) => {
     const { productId, quantity } = input;
-    // Acceso seguro a configurable usando el operador de encadenamiento opcional (?)
     const threadId = config.configurable?.thread_id; 
 
-    const product = availableProducts.find(p => p.id === productId);
+    // Obtén la lista de productos consolidados de la fuente compartida
+    // Esta lista se carga y cachea desde tu API de inventario
+    const consolidatedProducts = getConsolidatedProducts();
+
+    // Busca el producto por su ID_Producto numérico
+    const product = consolidatedProducts.find(p => p.ID_Producto === productId);
 
     if (!product) {
-      return `Error: Producto con ID "${productId}" no encontrado. Por favor, asegúrate de que el ID sea correcto.`;
+      return `Error: Producto con ID "${productId}" no encontrado o no disponible en el inventario. Por favor, asegúrate de que el ID sea correcto y esté en existencia.`;
+    }
+    
+    // Verifica si hay existencias suficientes
+    if (product.Existencias_Total < quantity) {
+        return `Error: Solo hay ${product.Existencias_Total} unidades de "${product.Producto}" (ID: ${productId}) disponibles. No se pueden añadir ${quantity}.`;
     }
 
     // Lógica para añadir/actualizar en el carrito (simulada en memoria global)
     const currentQuoteItems: QuoteItem[] = (global as any)._quote_storage?.[threadId] || [];
-    const existingItemIndex = currentQuoteItems.findIndex(item => item.id === productId);
+    // Busca un item existente por su ID_Producto
+    const existingItemIndex = currentQuoteItems.findIndex(item => item.id === product.ID_Producto);
 
     if (existingItemIndex !== -1) {
+      // Si el producto ya está en el carrito, actualiza la cantidad
       currentQuoteItems[existingItemIndex].quantity += quantity;
     } else {
+      // Si no, añade el nuevo producto al carrito
       currentQuoteItems.push({
-        id: product.id,
-        name: product.nombre,
-        price: product.precio,
+        id: product.ID_Producto,     // Usa el ID_Producto del producto encontrado
+        name: product.Producto,      // Usa el nombre del producto encontrado
+        price: product.Precio_Venta, // Usa el precio del producto encontrado
         quantity: quantity,
       });
     }
 
-    // Actualizar el "estado" simulado
+    // Actualiza el "estado" simulado del carrito
     (global as any)._quote_storage = (global as any)._quote_storage || {};
     (global as any)._quote_storage[threadId] = currentQuoteItems;
 
-    return `"${product.nombre}" (ID: ${productId}) x${quantity} añadido a tu cotización.`;
+    return `"${product.Producto}" (ID: ${productId}) x${quantity} añadido a tu cotización.`
   },
 });
 
@@ -66,7 +67,6 @@ export const getQuoteSummary = new DynamicStructuredTool({
   name: "get_quote_summary",
   description: "Muestra un resumen de los productos que el usuario ha añadido a su cotización (carrito de compras) y el total. Útil cuando el usuario pregunta por su 'carrito' o 'cotización actual'.",
   schema: z.object({}),
-  // Aplica el mismo cambio aquí
   func: async (_, config: Record<string, any> = {}) => {
     const threadId = config.configurable?.thread_id;
 
@@ -93,7 +93,6 @@ export const clearQuote = new DynamicStructuredTool({
   name: "clear_quote",
   description: "Vacía el carrito de cotización del usuario. Útil si el usuario quiere empezar una cotización nueva o eliminar todos los productos.",
   schema: z.object({}),
-  // Aplica el mismo cambio aquí
   func: async (_, config: Record<string, any> = {}) => {
     const threadId = config.configurable?.thread_id;
 
@@ -128,11 +127,10 @@ export const sendQuoteToEmail = new DynamicStructuredTool({
       total += itemTotal;
     });
 
-    quoteContent += `\nTotal estimado de la cotización: $${total.toFixed(2)}`;
+    quoteContent += `\nTotal estimado: $${total.toFixed(2)}`;
     quoteContent += "\n\nGracias por su interés en nuestros productos. Si tiene alguna pregunta, no dude en contactarnos.\n";
     quoteContent += "Atentamente,\nEl equipo de Proveedora de Artes Gráficas.";
 
-    // Simulación del envío de correo electrónico
     console.log(`[Tool] Enviando cotización a ${email}:\n${quoteContent}`);
 
     // Aquí integrarías una API de envío de correo real
@@ -140,9 +138,6 @@ export const sendQuoteToEmail = new DynamicStructuredTool({
     // if (!emailServiceResult.success) {
     //   return "Lo siento, hubo un error al intentar enviar la cotización. Por favor, inténtalo de nuevo más tarde.";
     // }
-
-    // Opcional: limpiar la cotización después de enviarla
-    // (global as any)._quote_storage[threadId] = [];
 
     return `Cotización enviada exitosamente a ${email}. ¡Recibirás un correo pronto!`;
   },

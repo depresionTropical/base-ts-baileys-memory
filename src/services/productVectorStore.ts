@@ -4,9 +4,10 @@ import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { Document } from "langchain/document";
 import axios from "axios";
-import { Product, ConsolidatedProduct} from '../bot/state/types'; // Importa tu interfaz Product
+import { Product, ConsolidatedProduct } from '../bot/state/types'; // Asegúrate de que tus interfaces estén bien definidas
 
 let globalVectorStore: MemoryVectorStore | null = null; // Variable global para la vector store
+let globalConsolidatedProducts: ConsolidatedProduct[] = []; // NUEVO: Variable global para los productos consolidados
 let lastSuccessfulFetchTime: number = 0;
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // Refrescar cada 30 minutos (ajusta según necesites)
 
@@ -32,7 +33,6 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
             p.Existencias >= 1 && p.Estado_Producto === 1
         ) as Product[];
 
-        // Mensaje de advertencia si no hay productos disponibles después del filtro
         if (productosDisponibles.length === 0) {
             console.warn("[API] No se encontraron productos con Existencias >= 1 y Estado_Producto === 1 después del filtro inicial.");
         }
@@ -40,8 +40,7 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
         // 2. Consolidar productos por Codigo_Producto
         const productosConsolidadosMap: { [key: string]: ConsolidatedProduct } = {};
 
-        // Ahora iteramos sobre los productos YA FILTRADOS
-        for (const p of productosDisponibles) { // <-- ¡Importante! Usamos 'productosDisponibles'
+        for (const p of productosDisponibles) {
             const codigoProducto = p.Codigo_Producto;
 
             if (productosConsolidadosMap[codigoProducto]) {
@@ -55,7 +54,7 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
                     Producto: p.Producto,
                     Codigo_Producto: p.Codigo_Producto,
                     Precio_Venta: p.Precio_Venta,
-                    Existencias_Total: p.Existencias, // Esta es la existencia del almacén actual
+                    Existencias_Total: p.Existencias,
                     Estado_Producto: p.Estado_Producto,
                     Almacenes_Disponibles: [p.Almacen]
                 };
@@ -73,7 +72,6 @@ async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<Consolidat
     }
 }
 
-
 /**
  * Crea o actualiza la MemoryVectorStore con los productos obtenidos de la API.
  * Se puede llamar periódicamente para mantener la Store actualizada.
@@ -82,13 +80,13 @@ export async function initializeOrRefreshProductVectorStore(): Promise<void> {
     const now = Date.now();
     if (globalVectorStore && (now - lastSuccessfulFetchTime < REFRESH_INTERVAL_MS)) {
         console.log("[VectorStore] Saltando refresh, usando VectorStore en caché.");
-        return; // No refrescar si no ha pasado suficiente tiempo
+        return;
     }
 
     console.log("[VectorStore] Inicializando/Refrescando Product Vector Store...");
     try {
-        // Llama a la nueva función que también consolida
         const products = await fetchAndFilterAndConsolidateProductsFromAPI();
+        globalConsolidatedProducts = products; // ¡IMPORTANTE! Almacena los productos consolidados aquí
 
         if (products.length === 0) {
             console.warn("[VectorStore] No se encontraron productos únicos con Existencias > 0 y Estado_Producto === 1. La VectorStore estará vacía.");
@@ -99,11 +97,8 @@ export async function initializeOrRefreshProductVectorStore(): Promise<void> {
         }
 
         const docs = products.map((p) => {
-            // Combina campos relevantes para crear el contenido del documento.
-            // Ahora incluye la información de almacenes disponibles y existencias totales.
-            const pageContent = `Producto: ${p.Producto}, Código: ${p.Codigo_Producto}, Precio: ${p.Precio_Venta}, Existencias totales: ${p.Existencias_Total}, Disponible en almacenes: ${p.Almacenes_Disponibles.join(', ')}`;
+            const pageContent = `Producto: ${p.Producto}, Código: ${p.Codigo_Producto}, Precio: $${p.Precio_Venta}, Existencias totales: ${p.Existencias_Total}, Disponible en almacenes: ${p.Almacenes_Disponibles.join(', ')}`;
             
-            // Incluye todos los datos del producto consolidado en los metadatos para recuperarlos más tarde
             return new Document({ pageContent: pageContent, metadata: { ...p } });
         });
 
@@ -128,8 +123,16 @@ export async function initializeOrRefreshProductVectorStore(): Promise<void> {
  */
 export async function getProductVectorStore(): Promise<MemoryVectorStore> {
     if (!globalVectorStore) {
-        // Intenta inicializar si aún no lo ha hecho
         await initializeOrRefreshProductVectorStore();
     }
-    return globalVectorStore!; // ! para asegurar que no es null después del await
+    return globalVectorStore!;
+}
+
+/**
+ * NUEVO: Obtiene la lista cacheada de productos consolidados.
+ * Las herramientas como 'add_to_quote' pueden usar esto para validar y obtener detalles del producto.
+ * @returns {ConsolidatedProduct[]} Un array de productos consolidados.
+ */
+export function getConsolidatedProducts(): ConsolidatedProduct[] {
+    return globalConsolidatedProducts;
 }
