@@ -4,17 +4,18 @@ import { MemoryVectorStore } from "langchain/vectorstores/memory";
 import { OpenAIEmbeddings } from "@langchain/openai";
 import { Document } from "langchain/document";
 import axios from "axios";
-import { Product } from '../bot/state/types'; // Importa tu interfaz Product
+import { Product, ConsolidatedProduct} from '../bot/state/types'; // Importa tu interfaz Product
 
 let globalVectorStore: MemoryVectorStore | null = null; // Variable global para la vector store
 let lastSuccessfulFetchTime: number = 0;
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000; // Refrescar cada 30 minutos (ajusta según necesites)
 
 /**
- * Obtiene los productos del inventario de tu API, aplicando los filtros de Existencias y Estado_Producto.
- * @returns {Promise<Product[]>} Un array de productos filtrados.
+ * Obtiene los productos del inventario de tu API, aplicando los filtros de Existencias y Estado_Producto,
+ * y consolidando productos duplicados por almacén.
+ * @returns {Promise<ConsolidatedProduct[]>} Un array de productos consolidados y filtrados.
  */
-async function fetchAndFilterProductsFromAPI(): Promise<Product[]> {
+async function fetchAndFilterAndConsolidateProductsFromAPI(): Promise<ConsolidatedProduct[]> {
     try {
         console.log("[API] Obteniendo productos de http://localhost:4001/inventario...");
         const response = await axios.get("http://localhost:4001/inventario");
@@ -26,12 +27,46 @@ async function fetchAndFilterProductsFromAPI(): Promise<Product[]> {
             throw new Error("La respuesta de la API no contiene un arreglo de productos válido bajo la clave 'products'.");
         }
 
-        const productosFiltrados = productosRaw.filter((p: any) =>
+        // 1. Filtrar productos por Existencias y Estado_Producto
+        const productosDisponibles = productosRaw.filter((p: Product) =>
             p.Existencias >= 1 && p.Estado_Producto === 1
         ) as Product[];
 
-        console.log(`[API] Productos cargados y filtrados (Existencias >= 1, Estado_Producto === 1): ${productosFiltrados.length} encontrados.`);
-        return productosFiltrados;
+        // 2. Consolidar productos por Codigo_Producto
+        const productosConsolidadosMap: { [key: string]: ConsolidatedProduct } = {};
+
+        for (const p of productosDisponibles) {
+            const codigoProducto = p.Codigo_Producto;
+
+            if (productosConsolidadosMap[codigoProducto]) {
+                // Producto ya visto, agrega el almacén actual a su lista
+                if (!productosConsolidadosMap[codigoProducto].Almacenes_Disponibles.includes(p.Almacen)) {
+                    productosConsolidadosMap[codigoProducto].Almacenes_Disponibles.push(p.Almacen);
+                }
+                // Suma las existencias para obtener el total consolidado
+                productosConsolidadosMap[codigoProducto].Existencias_Total += p.Existencias;
+                // Nota: El Precio_Venta se mantiene como el del primer almacén encontrado para este producto.
+                // Si necesitas una lógica diferente para el precio (ej. promedio, mínimo, máximo), ajústalo aquí.
+
+            } else {
+                // Primera vez que vemos este producto, crea una nueva entrada consolidada
+                productosConsolidadosMap[codigoProducto] = {
+                    ID_Producto: p.ID_Producto,
+                    Producto: p.Producto,
+                    Codigo_Producto: p.Codigo_Producto,
+                    Precio_Venta: p.Precio_Venta, // Toma el precio del primer almacén encontrado
+                    Existencias_Total: p.Existencias,
+                    Estado_Producto: p.Estado_Producto,
+                    Almacenes_Disponibles: [p.Almacen] // Empieza con el almacén actual
+                };
+            }
+        }
+
+        // Convierte el mapa de productos consolidados de vuelta a un array
+        const productosFinales = Object.values(productosConsolidadosMap);
+
+        console.log(`[API] Productos cargados, filtrados y consolidados: ${productosFinales.length} productos únicos encontrados.`);
+        return productosFinales;
 
     } catch (error: any) {
         console.error("Error al obtener los datos del inventario desde la API:", error.message);
@@ -52,10 +87,11 @@ export async function initializeOrRefreshProductVectorStore(): Promise<void> {
 
     console.log("[VectorStore] Inicializando/Refrescando Product Vector Store...");
     try {
-        const products = await fetchAndFilterProductsFromAPI();
+        // Llama a la nueva función que también consolida
+        const products = await fetchAndFilterAndConsolidateProductsFromAPI();
 
         if (products.length === 0) {
-            console.warn("[VectorStore] No se encontraron productos con Existencias > 0 y Estado_Producto === 1. La VectorStore estará vacía.");
+            console.warn("[VectorStore] No se encontraron productos únicos con Existencias > 0 y Estado_Producto === 1. La VectorStore estará vacía.");
             globalVectorStore = new MemoryVectorStore(
                 new OpenAIEmbeddings({ apiKey: process.env.OPENAI_API_KEY })
             );
@@ -64,29 +100,24 @@ export async function initializeOrRefreshProductVectorStore(): Promise<void> {
 
         const docs = products.map((p) => {
             // Combina campos relevantes para crear el contenido del documento.
-            // Esto es lo que el modelo de embeddings 'leerá' para crear el vector.
-            const pageContent = `Producto: ${p.Producto}, Código: ${p.Codigo_Producto}, Precio: ${p.Precio_Venta}`;
+            // Ahora incluye la información de almacenes disponibles y existencias totales.
+            const pageContent = `Producto: ${p.Producto}, Código: ${p.Codigo_Producto}, Precio: ${p.Precio_Venta}, Existencias totales: ${p.Existencias_Total}, Disponible en almacenes: ${p.Almacenes_Disponibles.join(', ')}`;
             
-            // Incluye todos los datos del producto en los metadatos para recuperarlos más tarde
+            // Incluye todos los datos del producto consolidado en los metadatos para recuperarlos más tarde
             return new Document({ pageContent: pageContent, metadata: { ...p } });
         });
 
-        // NOTA: MemoryVectorStore.fromDocuments recrea la store. Si quieres añadir/actualizar
-        // productos incrementalmente sin borrar lo existente, necesitarías un VectorStore diferente
-        // o manejarlo manualmente con addDocuments. Para este caso simple, fromDocuments es suficiente.
         globalVectorStore = await MemoryVectorStore.fromDocuments(
             docs,
             new OpenAIEmbeddings({
                 apiKey: process.env.OPENAI_API_KEY,
-                modelName: "text-embedding-ada-002", // o "text-embedding-3-small"
+                modelName: "text-embedding-3-small", // o "text-embedding-3-large"
             })
         );
         lastSuccessfulFetchTime = now;
-        console.log(`[VectorStore] Product Vector Store inicializada/actualizada con ${products.length} productos.`);
+        console.log(`[VectorStore] Product Vector Store inicializada/actualizada con ${products.length} productos únicos.`);
     } catch (error) {
         console.error("[VectorStore] Fallo al inicializar/refrescar la Vector Store:", error);
-        // Podrías lanzar el error o permitir que continue con una store vacía/vieja
-        // Depende de cómo quieras manejar fallos de carga inicial.
         throw error;
     }
 }
@@ -102,6 +133,3 @@ export async function getProductVectorStore(): Promise<MemoryVectorStore> {
     }
     return globalVectorStore!; // ! para asegurar que no es null después del await
 }
-
-// Puedes añadir una función para llamar al refresh en un cron job o setInterval si tu app lo soporta
-// Por ejemplo, setInterval(initializeOrRefreshProductVectorStore, REFRESH_INTERVAL_MS);

@@ -34,22 +34,15 @@ export interface Product {
     updatedAt: string;
 }
 
-
-export interface Product {
-    ID: number;
+// New interface for the consolidated product to be stored in the vector store
+export interface ConsolidatedProduct {
     ID_Producto: number;
-    Producto: string; // Nombre del producto
+    Producto: string;
     Codigo_Producto: string;
-    Almacen: string;
-    Codigo_Alm: string;
-    Periodo: string; // O number
-    Precio_Venta: number;
-    Existencias: number; // Campo para filtrar
-    Estado_Producto: number; // Campo para filtrar
-    createdAt: string;
-    updatedAt: string;
-    // Puedes añadir más campos que tu API devuelva y que sean relevantes
-    // Por ejemplo, si tienes una 'Marca' o 'Descripción' en tu API.
+    Precio_Venta: number; // You might decide to average or pick one if prices vary
+    Existencias_Total: number; // Sum of existences across all warehouses
+    Estado_Producto: number;
+    Almacenes_Disponibles: string[]; // List of warehouses where it's available
 }
 
 // Interfaces de respuesta de la herramienta (mantener igual)
