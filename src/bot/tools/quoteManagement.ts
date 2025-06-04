@@ -5,6 +5,9 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import { AgentState, QuoteItem, ConsolidatedProduct } from "../state/types";
 // Importa la función para obtener los productos consolidados
 import { getConsolidatedProducts } from '../../services/productVectorStore'; 
+import fs from 'fs';
+import path from 'path';
+import PDFDocument from 'pdfkit';
 
 // *** ESTE ARRAY HA SIDO ELIMINADO. YA NO ES NECESARIO. ***
 // const availableProducts = [ ... ];
@@ -103,13 +106,83 @@ export const clearQuote = new DynamicStructuredTool({
   },
 });
 
-export const sendQuoteToEmail = new DynamicStructuredTool({
-  name: "send_quote_to_email",
-  description: "Envía la cotización actual a una dirección de correo electrónico proporcionada por el usuario. Útil cuando el usuario indica que quiere 'recibir su cotización' o 'finalizar y enviar'.",
-  schema: z.object({
-    email: z.string().email().describe("La dirección de correo electrónico a la que se enviará la cotización. Ejemplo: 'usuario@example.com'"),
-  }),
-  func: async ({ email }, config: Record<string, any> = {}) => {
+function generateQuotePDF(quoteItems: QuoteItem[], threadId: string): string {
+  const currentDate = new Date().toLocaleDateString('es-MX');
+  const currentTime = new Date().toLocaleTimeString('es-MX');
+  
+  // Crear directorio si no existe
+  const assetsDir = path.join(process.cwd(), 'assets');
+  if (!fs.existsSync(assetsDir)) {
+    fs.mkdirSync(assetsDir, { recursive: true });
+  }
+
+  // Generar nombre de archivo único
+  const fileName = `cotizacion_${threadId}_${Date.now()}.pdf`;
+  const filePath = path.join(assetsDir, fileName);
+  
+  // Crear documento PDF
+  const doc = new PDFDocument();
+  doc.pipe(fs.createWriteStream(filePath));
+
+  // Encabezado
+  doc.fontSize(18).text('PROVEEDORA DE LAS ARTES GRÁFICAS', 50, 50);
+  doc.fontSize(16).text('COTIZACIÓN', 50, 80);
+  
+  // Información de la cotización
+  doc.fontSize(12);
+  doc.text(`Fecha: ${currentDate}`, 50, 120);
+  doc.text(`Hora: ${currentTime}`, 50, 140);
+  doc.text(`Folio: COT-${threadId}-${Date.now()}`, 50, 160);
+  doc.text(`Teléfono: ${threadId}`, 50, 180);
+
+  // Línea separadora
+  doc.moveTo(50, 210).lineTo(550, 210).stroke();
+
+  // Productos
+  doc.fontSize(14).text('PRODUCTOS:', 50, 230);
+  
+  let yPosition = 260;
+  let total = 0;
+
+  quoteItems.forEach((item, index) => {
+    const itemTotal = item.price * item.quantity;
+    total += itemTotal;
+    
+    doc.fontSize(10);
+    doc.text(`${index + 1}. ${item.name}`, 50, yPosition);
+    doc.text(`ID: ${item.id}`, 50, yPosition + 15);
+    doc.text(`Cantidad: ${item.quantity}`, 200, yPosition + 15);
+    doc.text(`Precio: ${item.price.toFixed(2)}`, 300, yPosition + 15);
+    doc.text(`Subtotal: ${itemTotal.toFixed(2)}`, 400, yPosition + 15);
+    
+    yPosition += 40;
+  });
+
+  // Total
+  doc.moveTo(50, yPosition + 10).lineTo(550, yPosition + 10).stroke();
+  doc.fontSize(14).text(`TOTAL: ${total.toFixed(2)}`, 400, yPosition + 25);
+
+  // Pie de página
+  doc.fontSize(10);
+  doc.text('Cotización válida por 48 horas y/o agotar existencias.', 50, yPosition + 60);
+  doc.text('Esperamos la confirmación de su pedido.', 50, yPosition + 75);
+  doc.text('Con gusto, le atiende nuestro equipo.', 50, yPosition + 90);
+  
+  doc.text('CONTACTO:', 50, yPosition + 120);
+  doc.text('WhatsApp: (662) 171-0425', 50, yPosition + 135);
+  doc.text('Matriz: (662) 215-7878', 50, yPosition + 150);
+
+  // Finalizar el documento
+  doc.end();
+  
+  return filePath;
+}
+
+export const sendQuoteToWhatsApp = new DynamicStructuredTool({
+  name: "send_quote_to_whatsapp",
+  description: "Genera y envía la cotización actual como archivo por WhatsApp. Útil cuando el usuario indica que quiere 'recibir su cotización', 'finalizar' o 'enviar cotización'.",
+  schema: z.object({}),
+  func: async (_, config: Record<string, any> = {}) => {
     const threadId = config.configurable?.thread_id;
     const currentQuoteItems: QuoteItem[] = (global as any)._quote_storage?.[threadId] || [];
 
@@ -117,28 +190,16 @@ export const sendQuoteToEmail = new DynamicStructuredTool({
       return "Tu cotización está vacía. No puedo enviar una cotización sin productos.";
     }
 
-    let quoteContent = "Estimado cliente,\n\n";
-    quoteContent += "Aquí está el resumen de su cotización de Proveedora de Artes Gráficas:\n\n";
-    let total = 0;
+    // Generar el archivo de cotización
+    const filePath = generateQuotePDF(currentQuoteItems, threadId);
+    
+    console.log(`[Tool] Cotización generada en: ${filePath}`);
 
-    currentQuoteItems.forEach(item => {
-      const itemTotal = item.price * item.quantity;
-      quoteContent += `- ${item.name} (ID: ${item.id}) - Cantidad: ${item.quantity} - Precio Unitario: $${item.price.toFixed(2)} - Subtotal: $${itemTotal.toFixed(2)}\n`;
-      total += itemTotal;
+    // Retornar un JSON especial que indica que se debe enviar un archivo
+    return JSON.stringify({
+      type: "file",
+      path: filePath,
+      message: "Aquí tienes tu cotización. ¡Gracias por tu interés en nuestros productos!"
     });
-
-    quoteContent += `\nTotal estimado: $${total.toFixed(2)}`;
-    quoteContent += "\n\nGracias por su interés en nuestros productos. Si tiene alguna pregunta, no dude en contactarnos.\n";
-    quoteContent += "Atentamente,\nEl equipo de Proveedora de Artes Gráficas.";
-
-    console.log(`[Tool] Enviando cotización a ${email}:\n${quoteContent}`);
-
-    // Aquí integrarías una API de envío de correo real
-    // const emailServiceResult = await someEmailService.send(email, "Tu Cotización de Artes Gráficas", quoteContent);
-    // if (!emailServiceResult.success) {
-    //   return "Lo siento, hubo un error al intentar enviar la cotización. Por favor, inténtalo de nuevo más tarde.";
-    // }
-
-    return `Cotización enviada exitosamente a ${email}. ¡Recibirás un correo pronto!`;
   },
 });

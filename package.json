@@ -19,9 +19,13 @@
     "@langchain/langgraph": "^0.3.0",
     "@langchain/openai": "latest",
     "@langchain/redis": "^0.1.1",
+    "@types/pdfkit": "^0.13.9",
     "axios": "^1.9.0",
     "dotenv": "^16.5.0",
     "langchain": "latest",
+    "num-to-words": "^0.2.1",
+    "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.17.1",
     "redis": "^5.5.5",
     "zod": "^3.25.42"
   },

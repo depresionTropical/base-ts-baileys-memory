@@ -86,9 +86,9 @@ ${allTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
 4.  **Vaciar Cotización (\`clear_quote\`):**
     * Úsala si el usuario pide "vaciar su carrito" o "empezar una cotización nueva".
 
-5.  **Enviar Cotización por Email (\`send_quote_to_email\`):**
-    * Utilízala cuando el usuario desee "finalizar" o "enviar la cotización" a un correo.
-    * **Siempre pide la dirección de correo electrónico** si el usuario no la proporciona explícitamente en la misma solicitud.
+5.  **Enviar Cotización por WhatsApp (\`send_quote_to_whatsapp\`):**
+    * Utilízala cuando el usuario desee "finalizar", "enviar la cotización" o "recibir su cotización".
+    * Esta herramienta generará automáticamente un archivo de cotización y lo enviará por WhatsApp.
 
 6.  **Preguntas Frecuentes (\`get_faq_answer\`):**
     * Emplea esta herramienta para preguntas sobre políticas de la empresa, métodos de pago, horarios, envíos, devoluciones o cualquier otra información general.
@@ -127,8 +127,6 @@ ${allTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
 * Sé **conciso y ve al punto** en tus respuestas.
 * Después de realizar una acción (como añadir al carrito), **sugiere el siguiente paso** lógico (ej. "¿quieres ver tu cotización?", "¿hay algo más en lo que pueda ayudarte?").
 `);
-// --- FIN DEFINICIÓN DE SYSTEMMESSAGE ---
-
 
 // --- 4. Definición de los Nodos del Grafo ---
 async function callAgent(
@@ -343,6 +341,9 @@ export async function askAgent(message: string, phoneNumber: string): Promise<st
     }
     
     // 5. Extraer la respuesta final del agente del historial completo de la invocación.
+    // REEMPLAZAR LA SECCIÓN DE EXTRACCIÓN DE RESPUESTA FINAL EN askAgent (líneas aprox 180-220)
+
+    // 5. Extraer la respuesta final del agente del historial completo de la invocación.
     let lastOutputMessage: BaseMessage | null = null;
     for (let i = allMessagesAfterGraphRun.length - 1; i >= 0; i--) {
       // Buscar el último AIMessage que NO sea una llamada a herramienta.
@@ -360,7 +361,12 @@ export async function askAgent(message: string, phoneNumber: string): Promise<st
       if (lastToolMessage) {
          try {
            const parsedOutput = JSON.parse(lastToolMessage.content);
-           if (parsedOutput && parsedOutput.status) {
+           
+           // NUEVO: Detectar si es una respuesta de archivo especial
+           if (parsedOutput && parsedOutput.type === "file" && parsedOutput.path) {
+             // Retornar directamente el JSON para que app.ts lo pueda procesar
+             finalResponse = lastToolMessage.content;
+           } else if (parsedOutput && parsedOutput.status) {
              if (parsedOutput.status === "many_results" && parsedOutput.common_attributes) {
                const commonAttrsList = parsedOutput.common_attributes.map((attr: string) => {
                  const [key, value] = attr.split(': ');
